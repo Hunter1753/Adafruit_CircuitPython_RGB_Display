@@ -1,5 +1,4 @@
 # SPDX-FileCopyrightText: 2017 Radomir Dopieralski for Adafruit Industries
-# SPDX-FileCopyrightText: 2023 Matt Land
 #
 # SPDX-License-Identifier: MIT
 
@@ -9,20 +8,11 @@
 
 Base class for all RGB Display devices
 
-* Author(s): Radomir Dopieralski, Michael McWethy, Matt Land
+* Author(s): Radomir Dopieralski, Michael McWethy
 """
 
 import struct
 import time
-
-try:
-    from typing import Optional, Union, Tuple, List, Any, ByteString
-    import digitalio
-    import busio
-
-    from circuitpython_typing.pil import Image
-except ImportError:
-    pass
 
 try:
     import numpy
@@ -31,7 +21,7 @@ except ImportError:
 
 from adafruit_bus_device import spi_device
 
-__version__ = "0.0.0+auto.0"
+__version__ = "3.10.19"
 __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_RGB_Display.git"
 
 # This is the size of the buffer to be used for fill operations, in 16-bit
@@ -46,22 +36,31 @@ except ImportError:
     pass
 
 
-def color565(
-    r: Union[int, Tuple[int, int, int], List[int]],
-    g: int = 0,
-    b: int = 0,
-) -> int:
+def color565(r, g=0, b=0):
     """Convert red, green and blue values (0-255) into a 16-bit 565 encoding.  As
     a convenience this is also available in the parent adafruit_rgb_display
     package namespace."""
-    if not isinstance(r, int):  # see if the first var is a tuple/list
-        red, g, b = r
-    else:
-        red = r
-    return (red & 0xF8) << 8 | (g & 0xFC) << 3 | b >> 3
+    try:
+        r, g, b = r  # see if the first var is a tuple/list
+    except TypeError:
+        pass
+    return (b & 0xF8) << 8 | (g & 0xFC) << 3 | r >> 3
 
+def color666(r, g=0, b=0):
+    """Convert red, green, and blue values (0-255) into a custom 666 encoding."""
+    try:
+        r, g, b = r  # see if the first var is a tuple/list
+    except TypeError:
+        pass
+    
+    # Scale and map the color values to the 6-bit range (0-63)
+    r = int((r / 255.0) * 63)
+    g = int((g / 255.0) * 63)
+    b = int((b / 255.0) * 63)
+    
+    return (r & 0x3F) << 18 | (g & 0x3F) << 10 | (b & 0x3F) << 2
 
-def image_to_data(image: Image) -> Any:
+def image_to_data(image):
     """Generator function to convert a PIL image to 16-bit 565 RGB bytes."""
     # NumPy is much faster at doing this. NumPy code provided by:
     # Keith (https://www.blogger.com/profile/02555547344016007163)
@@ -77,39 +76,37 @@ def image_to_data(image: Image) -> Any:
 class DummyPin:
     """Can be used in place of a ``DigitalInOut()`` when you don't want to skip it."""
 
-    def deinit(self) -> None:
+    def deinit(self):
         """Dummy DigitalInOut deinit"""
 
-    def switch_to_output(
-        self, *, value: bool = False, drive_mode: Optional[digitalio.DriveMode] = None
-    ) -> None:
+    def switch_to_output(self, *args, **kwargs):
         """Dummy switch_to_output method"""
 
-    def switch_to_input(self, *, pull: Optional[digitalio.Pull] = None) -> None:
+    def switch_to_input(self, *args, **kwargs):
         """Dummy switch_to_input method"""
 
     @property
-    def value(self) -> bool:
+    def value(self):
         """Dummy value DigitalInOut property"""
 
     @value.setter
-    def value(self, val: digitalio.DigitalInOut) -> None:
+    def value(self, val):
         pass
 
     @property
-    def direction(self) -> digitalio.Direction:
+    def direction(self):
         """Dummy direction DigitalInOut property"""
 
     @direction.setter
-    def direction(self, val: digitalio.Direction) -> None:
+    def direction(self, val):
         pass
 
     @property
-    def pull(self) -> digitalio.Pull:
+    def pull(self):
         """Dummy pull DigitalInOut property"""
 
     @pull.setter
-    def pull(self, val: digitalio.Pull) -> None:
+    def pull(self, val):
         pass
 
 
@@ -119,18 +116,18 @@ class Display:  # pylint: disable-msg=no-member
     :param height: number of pixels high
     """
 
-    _PAGE_SET: Optional[int] = None
-    _COLUMN_SET: Optional[int] = None
-    _RAM_WRITE: Optional[int] = None
-    _RAM_READ: Optional[int] = None
+    _PAGE_SET = None
+    _COLUMN_SET = None
+    _RAM_WRITE = None
+    _RAM_READ = None
     _X_START = 0  # pylint: disable=invalid-name
     _Y_START = 0  # pylint: disable=invalid-name
-    _INIT: Tuple[Tuple[int, Union[ByteString, None]], ...] = ()
+    _INIT = ()
     _ENCODE_PIXEL = ">H"
     _ENCODE_POS = ">HH"
     _DECODE_PIXEL = ">BBB"
 
-    def __init__(self, width: int, height: int, rotation: int) -> None:
+    def __init__(self, width, height, rotation):
         self.width = width
         self.height = height
         if rotation not in (0, 90, 180, 270):
@@ -138,25 +135,13 @@ class Display:  # pylint: disable-msg=no-member
         self._rotation = rotation
         self.init()
 
-    def write(
-        self, command: Optional[int] = None, data: Optional[ByteString] = None
-    ) -> None:
-        """Abstract method"""
-        raise NotImplementedError()
-
-    def read(self, command: Optional[int] = None, count: int = 0) -> ByteString:
-        """Abstract method"""
-        raise NotImplementedError()
-
-    def init(self) -> None:
+    def init(self):
         """Run the initialization commands."""
         for command, data in self._INIT:
             self.write(command, data)
 
     # pylint: disable-msg=invalid-name,too-many-arguments
-    def _block(
-        self, x0: int, y0: int, x1: int, y1: int, data: Optional[ByteString] = None
-    ) -> Optional[ByteString]:
+    def _block(self, x0, y0, x1, y1, data=None):
         """Read or write a block of data."""
         self.write(
             self._COLUMN_SET, self._encode_pos(x0 + self._X_START, x1 + self._X_START)
@@ -172,36 +157,28 @@ class Display:  # pylint: disable-msg=no-member
 
     # pylint: enable-msg=invalid-name,too-many-arguments
 
-    def _encode_pos(self, x: int, y: int) -> bytes:
-        """Encode a position into bytes."""
+    def _encode_pos(self, x, y):
+        """Encode a postion into bytes."""
         return struct.pack(self._ENCODE_POS, x, y)
 
-    def _encode_pixel(self, color: Union[int, Tuple]) -> bytes:
+    def _encode_pixel(self, color):
         """Encode a pixel color into bytes."""
         return struct.pack(self._ENCODE_PIXEL, color)
 
-    def _decode_pixel(self, data: Union[bytes, Union[bytearray, memoryview]]) -> int:
+    def _decode_pixel(self, data):
         """Decode bytes into a pixel color."""
         return color565(*struct.unpack(self._DECODE_PIXEL, data))
 
-    def pixel(
-        self, x: int, y: int, color: Optional[Union[int, Tuple]] = None
-    ) -> Optional[int]:
+    def pixel(self, x, y, color=None):
         """Read or write a pixel at a given position."""
         if color is None:
-            return self._decode_pixel(self._block(x, y, x, y))  # type: ignore[arg-type]
+            return self._decode_pixel(self._block(x, y, x, y))
 
         if 0 <= x < self.width and 0 <= y < self.height:
             self._block(x, y, x, y, self._encode_pixel(color))
         return None
 
-    def image(
-        self,
-        img: Image,
-        rotation: Optional[int] = None,
-        x: int = 0,
-        y: int = 0,
-    ) -> None:
+    def image(self, img, rotation=None, x=0, y=0):
         """Set buffer to value of Python Imaging Library image. The image should
         be in 1 bit mode and a size not exceeding the display size when drawn at
         the supplied origin."""
@@ -233,9 +210,7 @@ class Display:  # pylint: disable-msg=no-member
         self._block(x, y, x + imwidth - 1, y + imheight - 1, pixels)
 
     # pylint: disable-msg=too-many-arguments
-    def fill_rectangle(
-        self, x: int, y: int, width: int, height: int, color: Union[int, Tuple]
-    ) -> None:
+    def fill_rectangle(self, x, y, width, height, color):
         """Draw a rectangle at specified position with specified width and
         height, and fill it with the specified color."""
         x = min(self.width - 1, max(0, x))
@@ -253,25 +228,25 @@ class Display:  # pylint: disable-msg=no-member
 
     # pylint: enable-msg=too-many-arguments
 
-    def fill(self, color: Union[int, Tuple] = 0) -> None:
+    def fill(self, color=0):
         """Fill the whole display with the specified color."""
         self.fill_rectangle(0, 0, self.width, self.height, color)
 
-    def hline(self, x: int, y: int, width: int, color: Union[int, Tuple]) -> None:
+    def hline(self, x, y, width, color):
         """Draw a horizontal line."""
         self.fill_rectangle(x, y, width, 1, color)
 
-    def vline(self, x: int, y: int, height: int, color: Union[int, Tuple]) -> None:
+    def vline(self, x, y, height, color):
         """Draw a vertical line."""
         self.fill_rectangle(x, y, 1, height, color)
 
     @property
-    def rotation(self) -> int:
+    def rotation(self):
         """Set the default rotation"""
         return self._rotation
 
     @rotation.setter
-    def rotation(self, val: int) -> None:
+    def rotation(self, val):
         if val not in (0, 90, 180, 270):
             raise ValueError("Rotation must be 0/90/180/270")
         self._rotation = val
@@ -283,19 +258,19 @@ class DisplaySPI(Display):
     # pylint: disable-msg=too-many-arguments
     def __init__(
         self,
-        spi: busio.SPI,
-        dc: digitalio.DigitalInOut,
-        cs: digitalio.DigitalInOut,
-        rst: Optional[digitalio.DigitalInOut] = None,
-        width: int = 1,
-        height: int = 1,
-        baudrate: int = 12000000,
-        polarity: int = 0,
-        phase: int = 0,
+        spi,
+        dc,
+        cs,
+        rst=None,
+        width=1,
+        height=1,
+        baudrate=12000000,
+        polarity=0,
+        phase=0,
         *,
-        x_offset: int = 0,
-        y_offset: int = 0,
-        rotation: int = 0
+        x_offset=0,
+        y_offset=0,
+        rotation=0
     ):
         self.spi_device = spi_device.SPIDevice(
             spi, cs, baudrate=baudrate, polarity=polarity, phase=phase
@@ -312,19 +287,15 @@ class DisplaySPI(Display):
 
     # pylint: enable-msg=too-many-arguments
 
-    def reset(self) -> None:
+    def reset(self):
         """Reset the device"""
-        if not self.rst:
-            raise RuntimeError("a reset pin was not provided")
         self.rst.value = 0
         time.sleep(0.050)  # 50 milliseconds
         self.rst.value = 1
         time.sleep(0.050)  # 50 milliseconds
 
     # pylint: disable=no-member
-    def write(
-        self, command: Optional[int] = None, data: Optional[ByteString] = None
-    ) -> None:
+    def write(self, command=None, data=None):
         """SPI write to the device: commands and data"""
         if command is not None:
             self.dc_pin.value = 0
@@ -335,7 +306,7 @@ class DisplaySPI(Display):
             with self.spi_device as spi:
                 spi.write(data)
 
-    def read(self, command: Optional[int] = None, count: int = 0) -> ByteString:
+    def read(self, command=None, count=0):
         """SPI read from device with optional command"""
         data = bytearray(count)
         self.dc_pin.value = 0
